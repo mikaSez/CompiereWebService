@@ -1,0 +1,140 @@
+version = '1.0'
+
+apply plugin: 'jetty'
+
+sourceCompatibility = 1.6
+
+// Library Versions
+project.ext {
+    commonsDbcpVersion = '+'
+    freemarkerVersion = '+'
+    h2dbversion = '+'
+    hibernateCoreVersion = '+'
+    hibernateAnnotationsVersion = '+'
+    hibernateValidatorVersion = '+'
+    junitVersion = '+'
+    liquibaseVersion = '+'
+    mockitoVersion = '+'
+    slf4jVersion = '+'
+    seleniumVersion = '+'
+    servletApiVersion = '+'
+    springVersion = '+'
+}
+
+repositories {
+    mavenLocal()
+
+    mavenCentral()
+}
+
+sourceSets {
+    test {
+        java {
+            srcDirs = ['src/test/unit/java']
+        }
+    }
+    integration {
+        java {
+            srcDirs = ['src/test/integration/java']
+        }
+        compileClasspath = sourceSets.main.output + sourceSets.integration.compileClasspath
+    }
+    functional {
+        java {
+            srcDirs = ['src/test/functional/java']
+        }
+    }
+}
+
+configurations {
+    integrationCompile { extendsFrom compile }
+    integrationRuntime { extendsFrom integrationCompile, runtime }
+}
+
+dependencies {
+
+    /* DB */
+    compile "com.h2database:h2:$project.h2dbversion"
+    compile "commons-dbcp:commons-dbcp:$project.commonsDbcpVersion"
+    compile "org.hibernate:hibernate-core:$project.hibernateCoreVersion"
+    compile "org.hibernate:hibernate-validator:$project.hibernateValidatorVersion"
+    compile "org.springframework:spring-orm:$project.springVersion"
+
+    compile "org.liquibase:liquibase-core:$project.liquibaseVersion"
+
+    /* Web */
+    compile "org.springframework:spring-webmvc:$project.springVersion"
+    compile "org.freemarker:freemarker:$project.freemarkerVersion"
+
+    /* Utilities */
+    compile "org.slf4j:slf4j-log4j12:$project.slf4jVersion"
+    compile "org.springframework:spring-context:$project.springVersion"
+
+    /* Unit Test Only */
+    testCompile "junit:junit:$project.junitVersion"
+    testCompile "org.mockito:mockito-all:$project.mockitoVersion"
+
+    /* Integration Test Only */
+    integrationCompile "junit:junit:$project.junitVersion"
+    integrationCompile "org.springframework:spring-test:$project.springVersion"
+
+    /* Functional Test Only */
+    functionalCompile "junit:junit:$project.junitVersion"
+    functionalCompile "org.seleniumhq.selenium:selenium-java:$project.seleniumVersion"
+
+}
+
+task jettyDaemon(type: org.gradle.api.plugins.jetty.JettyRun) {
+    daemon = true
+}
+
+// TODO: MAJOR: Change 'YOUR_APP_NAME' to something suitable
+[jettyRun, jettyDaemon]*.contextPath = 'YOUR_APP_NAME'
+
+test {
+    testReportDir = file('build/reports/tests/unit')
+    testResultsDir = file('build/results/tests/unit')
+}
+
+task integration(type: Test) {
+    description = 'Runs the integration tests'
+    group = 'Verification'
+    testClassesDir = sourceSets.integration.output.classesDir
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.integration.runtimeClasspath
+    testReportDir = file('build/reports/tests/integration')
+    testResultsDir = file('build/results/tests/integration')
+}
+check.dependsOn integration
+
+task functional(type: Test, dependsOn: jettyDaemon) {
+    description = 'Runs the functional tests'
+    group = 'Verification'
+    testClassesDir = sourceSets.functional.output.classesDir
+    classpath = sourceSets.functional.runtimeClasspath
+    testReportDir = file('build/reports/tests/functional')
+    testResultsDir = file('build/results/tests/funtional')
+}
+check.dependsOn functional
+
+task compile(dependsOn: [compileJava, compileTestJava, compileIntegrationJava, compileFunctionalJava])
+task flattenMainJars(type:Copy, dependsOn: compile) { into 'lib/main' from configurations.compile }
+task flattenTestUnitJars(type:Copy) { into 'lib/test/unit' from configurations.testCompile - configurations.compile}
+task flattenTestIntegrationJars(type:Copy) { into 'lib/test/integration' from configurations.integrationCompile - configurations.compile }
+task flattenTestFunctionalJars(type:Copy) {
+    into 'lib/test/functional'
+    from (configurations.functionalCompile - configurations.compile.filter { file ->
+            !file.name.contains('commons-logging')
+        })
+}
+task ideaLibs(dependsOn: [flattenMainJars, flattenTestUnitJars, flattenTestIntegrationJars, flattenTestFunctionalJars]) {
+    description = 'Create flat lib dir to make dependencies in IntelliJ easier: use "gradle cleanIdeaLibs ideaLibs" to recreate'
+    outputs.dir 'lib'
+}
+
+task precommit(dependsOn: [clean, test, integration, functional]) {
+    description = 'Build to use for before making a commit'
+    group = 'Verification'
+}
+// Forcing logical order for 'precommit' until the issue http://issues.gradle.org/browse/GRADLE-427 is fixed
+functional.dependsOn(integration)
+integration.dependsOn(test)
